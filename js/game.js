@@ -8,7 +8,7 @@ const BEST_SCORE_STORAGE_KEY = "deep-sea-fish-best-score";
 
 /** Unifies mouse, touch and keyboard into steering intent for the player. */
 class InputController {
-  constructor(canvas, dashButton) {
+  constructor(canvas, dashButton, joystickElement) {
     this.pointerScreenX = 0;
     this.pointerScreenY = 0;
     this.hasPointer = false;
@@ -16,9 +16,64 @@ class InputController {
     this.isKeyboardDashing = false;
     this.isButtonDashing = false;
     this.pressedKeys = new Set();
+    this.joystickElement = joystickElement;
+    this.joystickPointerId = null;
+    this.joystickAngle = 0;
+    this.joystickStrength = 0;
     this.bindPointer(canvas);
     this.bindKeyboard();
     this.bindDashButton(dashButton);
+    this.bindJoystick(joystickElement);
+  }
+
+  /**
+   * Virtual stick: the knob follows the finger inside the ring. Direction is the knob angle,
+   * strength is how far it is pushed, with a small dead zone so a resting thumb does not drift.
+   */
+  bindJoystick(joystickElement) {
+    const knobElement = joystickElement.querySelector(".joystick-knob");
+    const deadZoneFraction = 0.12;
+    const updateFromEvent = (event) => {
+      const ringBounds = joystickElement.getBoundingClientRect();
+      const ringRadius = ringBounds.width / 2;
+      const offsetX = event.clientX - (ringBounds.left + ringRadius);
+      const offsetY = event.clientY - (ringBounds.top + ringRadius);
+      const offsetDistance = Math.hypot(offsetX, offsetY);
+      const clampedDistance = Math.min(offsetDistance, ringRadius);
+      const knobScale = offsetDistance > 0 ? clampedDistance / offsetDistance : 0;
+      knobElement.style.transform = `translate(${(offsetX * knobScale).toFixed(1)}px, ${(offsetY * knobScale).toFixed(1)}px)`;
+      const pushFraction = clampedDistance / ringRadius;
+      this.joystickAngle = Math.atan2(offsetY, offsetX);
+      this.joystickStrength = pushFraction < deadZoneFraction ? 0 : (pushFraction - deadZoneFraction) / (1 - deadZoneFraction);
+    };
+    joystickElement.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      this.joystickPointerId = event.pointerId;
+      joystickElement.classList.add("active");
+      updateFromEvent(event);
+      try {
+        joystickElement.setPointerCapture(event.pointerId);
+      } catch (captureError) {
+        // Capture only keeps the drag alive when the finger leaves the ring; steering still works without it.
+      }
+    });
+    joystickElement.addEventListener("pointermove", (event) => {
+      if (event.pointerId === this.joystickPointerId) updateFromEvent(event);
+    });
+    const releaseJoystick = (event) => {
+      if (event.pointerId === this.joystickPointerId) this.resetJoystick();
+    };
+    joystickElement.addEventListener("pointerup", releaseJoystick);
+    joystickElement.addEventListener("pointercancel", releaseJoystick);
+    joystickElement.addEventListener("lostpointercapture", releaseJoystick);
+  }
+
+  resetJoystick() {
+    this.joystickPointerId = null;
+    this.joystickStrength = 0;
+    this.joystickElement.classList.remove("active");
+    const knobElement = this.joystickElement.querySelector(".joystick-knob");
+    knobElement.style.transform = "";
   }
 
   bindPointer(canvas) {
@@ -59,12 +114,16 @@ class InputController {
       this.pressedKeys.delete(event.code);
       if (event.code === "Space") this.isKeyboardDashing = false;
     });
-    window.addEventListener("blur", () => {
-      this.pressedKeys.clear();
-      this.isKeyboardDashing = false;
-      this.isPointerDashing = false;
-      this.isButtonDashing = false;
-    });
+    window.addEventListener("blur", () => this.releaseAll());
+  }
+
+  /** Drops every held key and dash flag, so nothing stays "stuck" after a pause or focus loss. */
+  releaseAll() {
+    this.pressedKeys.clear();
+    this.isKeyboardDashing = false;
+    this.isPointerDashing = false;
+    this.isButtonDashing = false;
+    if (this.joystickElement) this.resetJoystick();
   }
 
   bindDashButton(dashButton) {
@@ -84,12 +143,21 @@ class InputController {
       - (this.pressedKeys.has("KeyA") || this.pressedKeys.has("ArrowLeft") ? 1 : 0);
     const vertical = (this.pressedKeys.has("KeyS") || this.pressedKeys.has("ArrowDown") ? 1 : 0)
       - (this.pressedKeys.has("KeyW") || this.pressedKeys.has("ArrowUp") ? 1 : 0);
-    const hasDirection = horizontal !== 0 || vertical !== 0;
+    const hasKeyboardDirection = horizontal !== 0 || vertical !== 0;
+    // The joystick wins over keys because on a phone it is the only steering input in use.
+    const hasJoystickDirection = this.joystickPointerId !== null && this.joystickStrength > 0;
+    const hasDirection = hasJoystickDirection || hasKeyboardDirection;
     const pointerWorld = screenToWorld(this.pointerScreenX, this.pointerScreenY);
+    let directionAngle = Math.atan2(vertical, horizontal);
+    let directionStrength = hasKeyboardDirection ? 1 : 0;
+    if (hasJoystickDirection) {
+      directionAngle = this.joystickAngle;
+      directionStrength = this.joystickStrength;
+    }
     return {
       hasDirection,
-      directionAngle: Math.atan2(vertical, horizontal),
-      directionStrength: hasDirection ? 1 : 0,
+      directionAngle,
+      directionStrength,
       hasPointerTarget: this.hasPointer,
       pointerWorldX: pointerWorld.x,
       pointerWorldY: pointerWorld.y,
@@ -139,10 +207,19 @@ class Game {
       resultScore: document.getElementById("result-score"),
       resultBest: document.getElementById("result-best"),
       resultStage: document.getElementById("result-stage"),
+      pauseScreen: document.getElementById("pause-screen"),
+      pauseButton: document.getElementById("pause-button"),
+      muteButton: document.getElementById("mute-button"),
+      joystick: document.getElementById("joystick"),
     };
+    this.sound = new SoundEngine();
+    this.isPaused = false;
+    this.wasPlayerDashing = false;
+    this.lastThreatSoundTime = -Infinity;
     this.background = new OceanBackground();
-    this.input = new InputController(this.canvas, this.interface.dashButton);
+    this.input = new InputController(this.canvas, this.interface.dashButton, this.interface.joystick);
     this.isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+    document.body.classList.toggle("touch-device", this.isTouchDevice);
     this.bestScore = this.loadBestScore();
     this.state = "menu";
     this.time = 0;
@@ -154,6 +231,12 @@ class Game {
     window.addEventListener("resize", () => this.resize());
     document.getElementById("start-button").addEventListener("click", () => this.startRun());
     document.getElementById("restart-button").addEventListener("click", () => this.startRun());
+    document.getElementById("resume-button").addEventListener("click", () => this.setPaused(false));
+    this.interface.pauseButton.addEventListener("click", () => this.setPaused(!this.isPaused));
+    this.interface.muteButton.addEventListener("click", () => this.toggleMuted());
+    this.bindGameKeys();
+    this.bindAutoPause();
+    this.updateMuteButton();
 
     this.resetWorld(null);
     requestAnimationFrame((timestamp) => this.frame(timestamp));
@@ -270,16 +353,25 @@ class Game {
   }
 
   startRun() {
+    this.sound.unlock();
     const player = new PlayerFish(WORLD_CONFIG.startX, WORLD_CONFIG.floorY * 0.3);
     this.camera.x = player.x;
     this.camera.y = player.y;
     this.resetWorld(player);
     this.state = "playing";
+    this.isPaused = false;
+    this.wasPlayerDashing = false;
+    this.lastThreatSoundTime = -Infinity;
     this.lastStageName = player.stage.name;
     this.interface.startScreen.classList.add("hidden");
     this.interface.gameOverScreen.classList.add("hidden");
+    this.interface.pauseScreen.classList.add("hidden");
     this.interface.hud.classList.remove("hidden");
+    this.interface.pauseButton.classList.remove("hidden");
+    this.updatePauseButton();
     this.interface.dashButton.classList.toggle("hidden", !this.isTouchDevice);
+    this.interface.joystick.classList.toggle("hidden", !this.isTouchDevice);
+    this.input.resetJoystick();
     this.showBanner(player.stage.name);
     this.updateHud();
   }
@@ -289,6 +381,8 @@ class Game {
     this.player.isAlive = false;
     this.deathTimer = 1.3;
     if (predator) predator.mouthOpen = 1;
+    this.interface.pauseButton.classList.add("hidden");
+    this.sound.playDeath();
     this.camera.shake = 14;
     this.emitBurst(this.player.x, this.player.y, this.player.species.glowColor, 26, this.player.size * 0.9);
     this.bestScore = Math.max(this.bestScore, Math.round(this.score));
@@ -299,10 +393,93 @@ class Game {
     this.state = "gameover";
     this.interface.hud.classList.add("hidden");
     this.interface.dashButton.classList.add("hidden");
+    this.interface.joystick.classList.add("hidden");
+    this.input.resetJoystick();
     this.interface.resultScore.textContent = String(Math.round(this.score));
     this.interface.resultBest.textContent = String(this.bestScore);
     this.interface.resultStage.textContent = this.player.stage.name;
     this.interface.gameOverScreen.classList.remove("hidden");
+  }
+
+  /** Pausing is only meaningful mid-run; menus and the death animation ignore it. */
+  setPaused(shouldPause) {
+    if (this.state !== "playing" || this.isPaused === shouldPause) return;
+    this.isPaused = shouldPause;
+    this.interface.pauseScreen.classList.toggle("hidden", !shouldPause);
+    this.updatePauseButton();
+    if (shouldPause) {
+      this.sound.suspend();
+      this.input.releaseAll();
+      document.getElementById("resume-button").focus();
+    } else {
+      this.sound.resume();
+      // Skip the paused interval so the next frame does not simulate a huge time step.
+      this.lastFrameTime = performance.now();
+    }
+  }
+
+  updatePauseButton() {
+    const pauseButton = this.interface.pauseButton;
+    pauseButton.textContent = this.isPaused ? "继续" : "暂停";
+    pauseButton.setAttribute("aria-label", this.isPaused ? "继续游戏" : "暂停游戏");
+  }
+
+  toggleMuted() {
+    this.sound.unlock();
+    this.sound.toggleMuted();
+    this.updateMuteButton();
+  }
+
+  updateMuteButton() {
+    const muteButton = this.interface.muteButton;
+    const isMuted = this.sound.isMuted;
+    muteButton.textContent = isMuted ? "音效 关" : "音效 开";
+    muteButton.setAttribute("aria-pressed", String(isMuted));
+    muteButton.setAttribute("aria-label", isMuted ? "开启音效" : "静音");
+  }
+
+  bindGameKeys() {
+    window.addEventListener("keydown", (event) => {
+      if (event.repeat) return;
+      if (event.code === "KeyP" || event.code === "Escape") {
+        event.preventDefault();
+        this.setPaused(!this.isPaused);
+      } else if (event.code === "KeyM") {
+        event.preventDefault();
+        this.toggleMuted();
+      }
+    });
+  }
+
+  /** Switching tabs or windows pauses the run so the player never dies while away. */
+  bindAutoPause() {
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) this.setPaused(true);
+    });
+    window.addEventListener("blur", () => this.setPaused(true));
+  }
+
+  /** Tags every fish as prey, rival or predator relative to the player; the renderer draws the matching outline. */
+  updateThreatLevels() {
+    // After death the player object still exists, but outlines should vanish with the HUD.
+    const player = this.state === "playing" ? this.player : null;
+    let hasNewHunter = false;
+    for (const fish of this.fishes) {
+      if (!player) {
+        fish.threatLevel = null;
+        continue;
+      }
+      if (player.size > fish.size * EAT_SIZE_RATIO) fish.threatLevel = "prey";
+      else if (fish.size > player.size * EAT_SIZE_RATIO) fish.threatLevel = "predator";
+      else fish.threatLevel = "rival";
+      if (fish.isHunting && !fish.wasHuntingPlayer) hasNewHunter = true;
+      fish.wasHuntingPlayer = fish.isHunting;
+    }
+    // Throttled so several predators turning at once do not stack into noise.
+    if (hasNewHunter && this.time - this.lastThreatSoundTime > 2.5) {
+      this.lastThreatSoundTime = this.time;
+      this.sound.playThreat();
+    }
   }
 
   showBanner(text) {
@@ -354,6 +531,7 @@ class Game {
       if (!plankton.isAlive) continue;
       if (MathUtils.distance(player.headX, player.headY, plankton.x, plankton.y) < player.size * 0.35 + plankton.radius) {
         plankton.isAlive = false;
+        this.sound.playPlankton();
         player.dashEnergy = Math.min(1, player.dashEnergy + 0.12);
         this.score += 2;
         this.emitBurst(plankton.x, plankton.y, plankton.color, 4, 30);
@@ -362,6 +540,7 @@ class Game {
     for (const jellyfish of this.jellyfishes) {
       if (player.invulnerableTime > 0 || !jellyfish.touches(player)) continue;
       jellyfish.shockFlash = 1;
+      this.sound.playShock();
       player.size = Math.max(PLAYER_START_SIZE * 0.8, player.size * 0.9);
       player.dashEnergy = Math.max(0, player.dashEnergy - 0.4);
       player.invulnerableTime = 1.4;
@@ -385,7 +564,9 @@ class Game {
     this.score += Math.round(fish.size * 1.5 * comboMultiplier);
     this.emitBurst(fish.x, fish.y, fish.species.glowStrength > 0 ? fish.species.glowColor : fish.species.finColor, 12, fish.size * 1.2);
     this.camera.shake = Math.max(this.camera.shake, 3);
+    this.sound.playEat(fish.size / player.size, this.comboCount);
     if (player.grow(fish.size)) {
+      this.sound.playEvolve();
       this.showBanner(player.stage.name);
       this.emitBurst(player.x, player.y, player.species.glowColor, 40, player.size * 1.6);
     }
@@ -415,6 +596,8 @@ class Game {
     if (isPlaying) {
       const intent = this.input.readIntent((screenX, screenY) => this.screenToWorld(screenX, screenY));
       this.player.update(deltaSeconds, intent, world);
+      if (this.player.isDashing && !this.wasPlayerDashing) this.sound.playDash();
+      this.wasPlayerDashing = this.player.isDashing;
       if (this.player.isDashing && Math.random() < deltaSeconds * 26) {
         const tailX = this.player.x - Math.cos(this.player.heading) * this.player.size * 0.5;
         const tailY = this.player.y - Math.sin(this.player.heading) * this.player.size * 0.5;
@@ -432,6 +615,7 @@ class Game {
     for (const particle of this.particles) particle.update(deltaSeconds);
 
     if (isPlaying) this.handlePlayerInteractions(deltaSeconds);
+    this.updateThreatLevels();
     this.handleNpcPredation();
     this.maintainPopulation();
     this.updateCamera(deltaSeconds);
@@ -587,7 +771,8 @@ class Game {
     // Clamp the step so a backgrounded tab does not teleport everything on return.
     const deltaSeconds = MathUtils.clamp((timestamp - this.lastFrameTime) / 1000, 0, 1 / 30);
     this.lastFrameTime = timestamp;
-    this.update(deltaSeconds);
+    // While paused the scene keeps rendering (frozen) so the pause card has the game behind it.
+    if (!this.isPaused) this.update(deltaSeconds);
     this.render();
     requestAnimationFrame((nextTimestamp) => this.frame(nextTimestamp));
   }

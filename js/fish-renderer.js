@@ -337,6 +337,33 @@ const FishRenderer = {
   },
 };
 
+/**
+ * Outline colors that tell the player at a glance how a fish relates to them.
+ * Predators also get a thicker, pulsing outline so the cue does not rely on color alone.
+ */
+const THREAT_OUTLINE_STYLES = {
+  prey: { color: "#5dff9a", screenWidth: 2, alpha: 0.75, pulses: false },
+  rival: { color: "#ffd24a", screenWidth: 2, alpha: 0.7, pulses: false },
+  predator: { color: "#ff5a64", screenWidth: 3.2, alpha: 0.9, pulses: true },
+};
+
+FishRenderer.drawThreatOutline = function drawThreatOutline(context, fish, geometry, pixelsPerUnit, verticalScaleMagnitude) {
+  const outlineStyle = THREAT_OUTLINE_STYLES[fish.threatLevel];
+  if (!outlineStyle) return;
+  const pulse = outlineStyle.pulses ? 0.65 + 0.35 * Math.sin((fish.glowPhase || 0) * 3) : 1;
+  // Width is specified in screen pixels so the outline reads the same at every zoom level;
+  // the vertical roll squash also thins strokes, so compensate with the average scale.
+  const averageScale = pixelsPerUnit * (1 + Math.max(verticalScaleMagnitude, 0.3)) / 2;
+  context.save();
+  context.beginPath();
+  traceSmoothClosedPath(context, geometry.outline);
+  context.strokeStyle = ColorUtils.toRgba(outlineStyle.color, outlineStyle.alpha * pulse);
+  context.lineWidth = outlineStyle.screenWidth / Math.max(averageScale, 0.05);
+  context.lineJoin = "round";
+  context.stroke();
+  context.restore();
+};
+
 FISH_SPECIES.silverMinnow.eyeScale = 0.38;
 FISH_SPECIES.stripedBarracuda.eyeScale = 0.46;
 FISH_SPECIES.abyssAngler.eyeScale = 0.2;
@@ -583,6 +610,7 @@ Object.assign(FishRenderer, {
     FishRenderer.drawMembraneFin(context, fish, geometry, 0.56, 0.8, -1, species.dorsalHeight * 0.6, false, detailed);
     FishRenderer.drawPairedFin(context, fish, geometry, 0.62, -0.85, 0.11, 0.035, 1.1, 0.7);
     FishRenderer.drawBody(context, fish, geometry, detailed);
+    if (fish.threatLevel) FishRenderer.drawThreatOutline(context, fish, geometry, pixelsPerUnit, Math.abs(verticalScale));
     FishRenderer.drawPairedFin(context, fish, geometry, 0.27, -0.2, 0.22, 0.06, 1.6, 0.85);
     FishRenderer.drawEye(context, fish, geometry);
     FishRenderer.drawMouth(context, fish, geometry);

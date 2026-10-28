@@ -27,6 +27,23 @@
 
   <div id="stage-banner" class="stage-banner" aria-live="assertive"></div>
   <button id="dash-button" class="dash-button hidden" type="button" aria-label="按住冲刺">冲刺</button>
+  <div id="joystick" class="joystick hidden" aria-label="方向轮盘" role="application">
+    <div id="joystick-knob" class="joystick-knob"></div>
+  </div>
+
+  <div class="control-buttons">
+    <button id="pause-button" class="icon-button hidden" type="button" aria-label="暂停游戏">暂停</button>
+    <button id="mute-button" class="icon-button" type="button" aria-pressed="false" aria-label="静音">音效 开</button>
+  </div>
+
+  <section id="pause-screen" class="overlay hidden" aria-labelledby="pause-title">
+    <div class="card">
+      <h2 id="pause-title" class="title small">暂停</h2>
+      <p class="subtitle">深海在等你回来</p>
+      <p class="pause-hint">按 <span class="key">P</span> 或 <span class="key">Esc</span> 继续</p>
+      <button id="resume-button" class="primary-button" type="button">继续游动</button>
+    </div>
+  </section>
 
   <section id="start-screen" class="overlay" aria-labelledby="game-title">
     <div class="card">
@@ -35,8 +52,9 @@
       <ul class="tips">
         <li><span class="key">鼠标 / 触摸 / WASD</span>引导游动方向</li>
         <li><span class="key">按住左键 / 空格</span>消耗能量冲刺</li>
-        <li>吞掉比你小的鱼，红眼睛的大鱼会猎杀你</li>
+        <li><span class="tag tag-prey">绿边</span>能吃 <span class="tag tag-rival">黄边</span>吃不动 <span class="tag tag-predator">红边</span>会吃你</li>
         <li>发光浮游生物补充能量，小心水母电击</li>
+        <li><span class="key">P / Esc</span>暂停 <span class="key">M</span>静音</li>
       </ul>
       <button id="start-button" class="primary-button" type="button">潜入深海</button>
     </div>
@@ -56,6 +74,7 @@
   </section>
 
   <script src="js/utils.js"></script>
+  <script src="js/audio.js"></script>
   <script src="js/scenery.js"></script>
   <script src="js/background.js"></script>
   <script src="js/fish-renderer.js"></script>
