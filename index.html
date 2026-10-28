@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>深海光鱼 · 吞噬进化</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="game-canvas" aria-label="大鱼吃小鱼游戏画面"></canvas>
+
+  <div id="hud" class="hud hidden">
+    <div class="hud-panel hud-left">
+      <div class="hud-label">得分</div>
+      <div id="hud-score" class="hud-score">0</div>
+      <div id="hud-combo" class="hud-combo" aria-live="polite"></div>
+    </div>
+    <div class="hud-panel hud-center">
+      <div id="hud-stage" class="hud-stage">幼鱼</div>
+      <div class="bar" role="progressbar" aria-label="进化进度"><div id="hud-growth" class="bar-fill growth"></div></div>
+    </div>
+    <div class="hud-panel hud-right">
+      <div class="hud-label">冲刺能量</div>
+      <div class="bar" role="progressbar" aria-label="冲刺能量"><div id="hud-energy" class="bar-fill energy"></div></div>
+    </div>
+  </div>
+
+  <div id="stage-banner" class="stage-banner" aria-live="assertive"></div>
+  <button id="dash-button" class="dash-button hidden" type="button" aria-label="按住冲刺">冲刺</button>
+
+  <section id="start-screen" class="overlay" aria-labelledby="game-title">
+    <div class="card">
+      <h1 id="game-title" class="title">深海光鱼</h1>
+      <p class="subtitle">吞噬 · 成长 · 进化</p>
+      <ul class="tips">
+        <li><span class="key">鼠标 / 触摸 / WASD</span>引导游动方向</li>
+        <li><span class="key">按住左键 / 空格</span>消耗能量冲刺</li>
+        <li>吞掉比你小的鱼，红眼睛的大鱼会猎杀你</li>
+        <li>发光浮游生物补充能量，小心水母电击</li>
+      </ul>
+      <button id="start-button" class="primary-button" type="button">潜入深海</button>
+    </div>
+  </section>
+
+  <section id="game-over-screen" class="overlay hidden" aria-labelledby="game-over-title">
+    <div class="card">
+      <h2 id="game-over-title" class="title small">被吞噬了</h2>
+      <p class="subtitle">深海从不缺少更大的鱼</p>
+      <div class="result-grid">
+        <div class="result-item"><div class="hud-label">得分</div><div id="result-score" class="result-value">0</div></div>
+        <div class="result-item"><div class="hud-label">最高</div><div id="result-best" class="result-value">0</div></div>
+        <div class="result-item"><div class="hud-label">阶段</div><div id="result-stage" class="result-value">幼鱼</div></div>
+      </div>
+      <button id="restart-button" class="primary-button" type="button">再次潜入</button>
+    </div>
+  </section>
+
+  <script src="js/utils.js"></script>
+  <script src="js/scenery.js"></script>
+  <script src="js/background.js"></script>
+  <script src="js/fish-renderer.js"></script>
+  <script src="js/entities.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
